@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="theme-color" content="#05040f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Facet</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #05040f;
+    color: #e8e6ff;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    background:
+      radial-gradient(ellipse at 50% 30%, #1a1650 0%, #05040f 62%);
+  }
+  .card {
+    width: min(92vw, 22rem);
+    text-align: center;
+    padding: 2.2rem 1.4rem 1.8rem;
+  }
+  h1 {
+    margin: 0 0 .35rem;
+    font-weight: 500;
+    letter-spacing: .45em;
+    font-size: 1.65rem;
+    text-indent: .45em;
+  }
+  p.tag {
+    margin: 0 0 1.8rem;
+    opacity: .45;
+    font-size: .78rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+  form { display: flex; flex-direction: column; gap: .75rem; }
+  input[type="password"] {
+    width: 100%;
+    border: 1px solid rgba(232,230,255,.18);
+    background: rgba(8,7,24,.65);
+    color: #f4f2ff;
+    border-radius: 999px;
+    padding: .95rem 1.2rem;
+    font-size: 16px; /* iOS won't zoom */
+    letter-spacing: .06em;
+    outline: none;
+    text-align: center;
+  }
+  input[type="password"]:focus {
+    border-color: rgba(180,200,255,.55);
+    box-shadow: 0 0 0 3px rgba(120,140,255,.15);
+  }
+  button {
+    border: 0;
+    border-radius: 999px;
+    padding: .95rem 1.2rem;
+    font-size: .95rem;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: #090814;
+    background: linear-gradient(180deg, #e8e6ff, #b8b4e6);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button[disabled] { opacity: .55; cursor: default; }
+  .err {
+    min-height: 1.2rem;
+    margin: .8rem 0 0;
+    color: #ffb4c4;
+    font-size: .85rem;
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .err.show { opacity: 1; }
+  .hint { display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>FACET</h1>
+    <p class="tag">Private play</p>
+    <form id="f" autocomplete="current-password">
+      <input id="pw" type="password" name="password" autocomplete="current-password" placeholder="Password" autofocus>
+      <button type="submit" id="go">Enter</button>
+    </form>
+    <p class="err" id="err"></p>
+  </div>
+<script>
+(function () {
+  const form = document.getElementById('f');
+  const input = document.getElementById('pw');
+  const btn = document.getElementById('go');
+  const err = document.getElementById('err');
+  const KEY = 'facet.unlock';
+
+  function showErr(msg) {
+    err.textContent = msg || 'Wrong password';
+    err.classList.add('show');
+  }
+  function hideErr() { err.classList.remove('show'); err.textContent = ''; }
+
+  function b64(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  async function decrypt(password, payload) {
+    const salt = b64(payload.salt);
+    const iv = b64(payload.iv);
+    const tag = b64(payload.tag);
+    const data = b64(payload.data);
+    const combined = new Uint8Array(data.length + tag.length);
+    combined.set(data, 0);
+    combined.set(tag, data.length);
+    const base = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']
+    );
+    const key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: payload.iter, hash: 'SHA-256' },
+      base,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
+    return new TextDecoder().decode(plain);
+  }
+
+  async function unlock(password, remember) {
+    hideErr();
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const payload = await fetch('payload.json', { cache: 'no-store' }).then((r) => {
+        if (!r.ok) throw new Error('load');
+        return r.json();
+      });
+      const html = await decrypt(password, payload);
+      if (remember) {
+        try { sessionStorage.setItem(KEY, password); } catch (e) {}
+      }
+      document.open();
+      document.write(html);
+      document.close();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Enter';
+      showErr(e && e.message === 'load' ? 'Could not load the game. Try again.' : 'Wrong password');
+      input.focus();
+      input.select();
+    }
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const pw = input.value;
+    if (!pw) { input.focus(); return; }
+    unlock(pw, true);
+  });
+
+  try {
+    const saved = sessionStorage.getItem(KEY);
+    if (saved) unlock(saved, false);
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
